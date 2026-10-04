@@ -8,7 +8,7 @@ people reckoned time before the advent of mechanical clocks and other devices
 in the late middle ages. Because the length of daylight changes with the season,
 a temporal hour is not fixed: in winter the daytime hours are shorter and the
 nighttime hours longer (and vice versa). This differs from 24-hour "equinoctial"
-time, so nammed after the equinox when temporal hours are equinoctial, which
+time, so named after the equinox when temporal hours are equinoctial, which
 splits the full day into 24 equal hours.
 
 ## Usage

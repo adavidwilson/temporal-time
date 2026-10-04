@@ -15,8 +15,9 @@ splits the full day into 24 equal hours.
 
 Run with `--sunrise` and `--sunset` as `HH:MM` times:
 
-````bash
+```bash
 python3 temporal_time.py --sunrise 06:00 --sunset 20:30 --now 14:00
+```
 
 `--now HH:MM` is optional; without it the program uses the system's current
 wall-clock time.
@@ -31,7 +32,7 @@ hour:
 python3 temporal_time.py --sunrise 06:00 --sunset 20:30 --temporal-time 01:00
 #   Input        : 01:00 (day block)
 #   -> Equinoctial: 06:00   (i.e. sunrise)
-````
+```
 
 Because the temporal time is 1-based (hour 1 starts at sunrise/sunset), use
 `--period {day,night}` to disambiguate when a temporal time could belong to either

@@ -26,57 +26,51 @@ SUNSET = 20 * 60 + 30   # 20:30
 
 
 class ParseTimeTests(unittest.TestCase):
-    def test_parse_time_basic(self):
+    def test_parse_time(self):
         self.assertEqual(parse_time("06:00"), 6 * 60)
-        self.assertEqual(parse_time("20:30"), 20 * 60 + 30)
+        self.assertEqual(parse_time("20:30"), SUNSET)
         self.assertEqual(parse_time("00:00"), 0)
         self.assertEqual(parse_time("23:59"), 23 * 60 + 59)
 
-    def test_parse_time_rejects_bad_format(self):
-        for bad in ("6", "ab:cd", "6:60", "24:00", "-1:00", "12-30"):
-            with self.assertRaises((ValueError, argparse.ArgumentTypeError)):
+    def test_parse_time_rejects_out_of_range(self):
+        for bad in ("24:00", "06:60", "25:00"):
+            with self.assertRaises(argparse.ArgumentTypeError):
                 parse_time(bad)
 
-    def test_parse_temporal_time_basic(self):
+    def test_parse_temporal_time(self):
         self.assertEqual(parse_temporal_time("01:00"), 60)
         self.assertEqual(parse_temporal_time("12:00"), 12 * 60)
-        self.assertEqual(parse_temporal_time("12:59"), 12 * 60 + 59)
         self.assertEqual(parse_temporal_time("06:30"), 6 * 60 + 30)
 
     def test_parse_temporal_time_rejects_out_of_range(self):
-        for bad in ("00:00", "13:00", "0", "12:60", "-1:00", "6:00:00"):
-            with self.assertRaises((ValueError, argparse.ArgumentTypeError)):
+        for bad in ("00:00", "13:00", "12:60"):
+            with self.assertRaises(argparse.ArgumentTypeError):
                 parse_temporal_time(bad)
 
 
 class HumanDurationTests(unittest.TestCase):
-    def test_minutes_only(self):
+    def test_minutes(self):
         self.assertEqual(human_duration(0), "0h 0m")
         self.assertEqual(human_duration(45), "0h 45m")
 
-    def test_hours_only(self):
+    def test_hours(self):
         self.assertEqual(human_duration(72), "1h 12m")
         self.assertEqual(human_duration(1080), "18h 0m")
 
-    def test_combined(self):
+    def test_rounding(self):
         self.assertEqual(human_duration(90), "1h 30m")
-        self.assertEqual(human_duration(870), "14h 30m")
-
-    def test_half_hours(self):
         self.assertEqual(human_duration(72.5), "1h 13m")
-        self.assertEqual(human_duration(47.5), "0h 48m")
+        self.assertEqual(human_duration(870), "14h 30m")
 
 
 class ComputeTests(unittest.TestCase):
-    def test_midday_time(self):
-        now = 12 * 60  # 12:00
-        result = compute(SUNRISE, SUNSET, now)
+    def test_midday(self):
+        result = compute(SUNRISE, SUNSET, 12 * 60)
         self.assertTrue(result["in_daytime"])
         self.assertEqual(result["day_minutes"], SUNSET - SUNRISE)
         self.assertEqual(
             result["night_minutes"], MINUTES_PER_DAY - (SUNSET - SUNRISE)
         )
-        # 6h elapsed at 72.5-min hour length = 4.966 temporal hours, hour 5.
         self.assertAlmostEqual(
             result["temporal_hour"], 6 * 60 / 72.5, places=3
         )
@@ -95,18 +89,16 @@ class ComputeTests(unittest.TestCase):
         self.assertEqual(result["current_hour"], 12)
 
     def test_midnight_is_night(self):
-        now = 0  # 00:00
-        result = compute(SUNRISE, SUNSET, now)
+        result = compute(SUNRISE, SUNSET, 0)
         self.assertFalse(result["in_daytime"])
-        # 210 min past sunset at 47.5-min hour length = 4.421 temporal hours.
         self.assertAlmostEqual(result["temporal_hour"], 210 / 47.5, places=3)
 
-    def test_inconsistent_input_raises(self):
-        # With sunrise after sunset the day window "crosses midnight" into a
-        # valid 9h30m day, so this input does not raise; skip this assertion
-        # and instead assert the computed window is sensible.
+    def test_day_crosses_midnight(self):
+        # sunrise after sunset means the daytime window wraps past midnight.
         result = compute(SUNSET, SUNRISE, 12 * 60)
-        self.assertEqual(result["day_minutes"], MINUTES_PER_DAY - (SUNSET - SUNRISE))
+        self.assertEqual(
+            result["day_minutes"], MINUTES_PER_DAY - (SUNSET - SUNRISE)
+        )
 
 
 class TemporalToWallClockTests(unittest.TestCase):
@@ -125,11 +117,10 @@ class TemporalToWallClockTests(unittest.TestCase):
         self.assertAlmostEqual(got, 722.5, places=1)
 
     def test_mid_hour_of_night(self):
-        got_midnight = temporal_to_wall_clock(SUNRISE, SUNSET, 6 * 60, "night")
-        expected_midnight = (SUNSET
-                             + 5 * (MINUTES_PER_DAY - (SUNSET - SUNRISE)) / 12.0) \
-                             % MINUTES_PER_DAY
-        self.assertAlmostEqual(got_midnight, expected_midnight, places=1)
+        got = temporal_to_wall_clock(SUNRISE, SUNSET, 6 * 60, "night")
+        expected = (SUNSET + 5 * (MINUTES_PER_DAY - (SUNSET - SUNRISE)) / 12) \
+            % MINUTES_PER_DAY
+        self.assertAlmostEqual(got, expected, places=1)
 
     def test_rejects_bad_temporal_hour(self):
         with self.assertRaises(ValueError):

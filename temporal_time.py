@@ -26,43 +26,24 @@ MINUTES_PER_DAY = 24 * 60
 
 def parse_time(text: str) -> int:
     """Parse an 'HH:MM' wall-clock string into minutes since 00:00."""
-    parts = text.split(":")
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError(f"time '{text}' is not in HH:MM format")
-    try:
-        hours = int(parts[0])
-        minutes = int(parts[1])
-    except ValueError:
+    hour_str, minute_str = text.split(":")
+    hour, minute = int(hour_str), int(minute_str)
+    if not (0 <= hour < 24 and 0 <= minute < 60):
         raise argparse.ArgumentTypeError(
-            f"time '{text}' is not in HH:MM format"
-        ) from None
-    if not (0 <= hours < 24 and 0 <= minutes < 60):
-        raise argparse.ArgumentTypeError(
-            f"time '{text}' is out of range (expected 00:00-23:59)"
+            f"'{text}' is not a valid time (expected 00:00-23:59)"
         )
-    return hours * 60 + minutes
+    return hour * 60 + minute
 
 
 def parse_temporal_time(text: str) -> int:
     """Parse a temporal 'H:MM' string (hour 1..12) into minutes."""
-    parts = text.split(":")
-    if len(parts) != 2:
+    hour_str, minute_str = text.split(":")
+    hour, minute = int(hour_str), int(minute_str)
+    if not (1 <= hour <= 12 and 0 <= minute < 60):
         raise argparse.ArgumentTypeError(
-            f"temporal time '{text}' is not in HH:MM format"
+            f"'{text}' is not a valid temporal time (hour must be 1..12)"
         )
-    try:
-        hours = int(parts[0])
-        minutes = int(parts[1])
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"temporal time '{text}' is not in HH:MM format"
-        ) from None
-    if not (1 <= hours <= 12 and 0 <= minutes < 60):
-        raise argparse.ArgumentTypeError(
-            "temporal hour must be 1..12 with minutes 00..59 "
-            f"(got {hours}:{minutes:02d})"
-        )
-    return hours * 60 + minutes
+    return hour * 60 + minute
 
 
 def human_duration(minutes: float) -> str:
@@ -89,44 +70,37 @@ class TemporalTime(TypedDict):
 
 
 def compute(sunrise: int, sunset: int, now: int) -> TemporalTime:
-    """Compute temporal time from times-in-minutes-since-midnight."""
+    """Compute the temporal time for ``now`` given sunrise/sunset times."""
     day_minutes = sunset - sunrise
     if day_minutes <= 0:
-        day_minutes += MINUTES_PER_DAY  # daytime window crosses midnight
+        day_minutes += MINUTES_PER_DAY  # daytime crosses midnight
     night_minutes = MINUTES_PER_DAY - day_minutes
 
-    # now / sunrise / sunset are minutes since 00:00 (0..1439).
     elapsed_day = (now - sunrise) % MINUTES_PER_DAY
     elapsed_night = (now - sunset) % MINUTES_PER_DAY
 
     if elapsed_day <= day_minutes:
-        in_daytime = True
-        elapsed = elapsed_day
-        hour_len = day_minutes / 12.0
+        in_daytime, elapsed, hour_len = True, elapsed_day, day_minutes / 12
     elif elapsed_night <= night_minutes:
-        in_daytime = False
-        elapsed = elapsed_night
-        hour_len = night_minutes / 12.0
+        in_daytime, elapsed, hour_len = False, elapsed_night, night_minutes / 12
     else:
         raise ValueError(
             "sunrise/sunset are inconsistent "
             "(sunset should be after sunrise within the ~24h cycle)"
         )
 
-    # 0.0 .. 12.0 temporal hours elapsed since the start of the period.
     temporal_hour = elapsed / hour_len
-    whole = int(temporal_hour)
-    frac_minutes = (temporal_hour - whole) * 60.0
-    # Hours are numbered 1..12: hour 1 starts at sunrise/sunset, hour 12 ends.
-    current_hour = min(whole + 1, 12)
+    whole_hour = int(temporal_hour)
+    minutes = (temporal_hour - whole_hour) * 60
+    current_hour = min(whole_hour + 1, 12)  # hours are numbered 1..12
 
     return TemporalTime(
         in_daytime=in_daytime,
         hour_len=hour_len,
         temporal_hour=temporal_hour,
-        whole_hour=whole,
+        whole_hour=whole_hour,
         current_hour=current_hour,
-        minutes=frac_minutes,
+        minutes=minutes,
         day_minutes=day_minutes,
         night_minutes=night_minutes,
     )
@@ -135,31 +109,23 @@ def compute(sunrise: int, sunset: int, now: int) -> TemporalTime:
 def temporal_to_wall_clock(
     sunrise: int, sunset: int, temp_minutes: int, period: Literal["day", "night"]
 ) -> float:
-    """Convert a temporal instant into equinoctial wall-clock minutes.
-
-    A temporal time of (hour, minute) sits (hour - 1 + minute / 60) temporal
-    hours after the start of its 12-hour block. Multiplying by that block's
-    hour length gives the wall-clock minutes past sunrise (day) or sunset
-    (night).
-    """
-    hours = temp_minutes // 60
-    minutes = temp_minutes % 60
-    if not (1 <= hours <= 12 and 0 <= minutes < 60):
-        raise ValueError(f"temporal hour must be 1..12 (got {hours}:{minutes:02d})")
+    """Convert a temporal instant into wall-clock minutes since 00:00."""
+    hour = temp_minutes // 60
+    minute = temp_minutes % 60
+    if not (1 <= hour <= 12 and 0 <= minute < 60):
+        raise ValueError(f"'{hour}:{minute:02d}' is not a valid temporal time")
 
     day_minutes = sunset - sunrise
     if day_minutes <= 0:
-        day_minutes += MINUTES_PER_DAY
+        day_minutes += MINUTES_PER_DAY  # daytime crosses midnight
     night_minutes = MINUTES_PER_DAY - day_minutes
 
     if period == "day":
-        start = sunrise
-        hour_len = day_minutes / 12.0
-    else:  # period == "night"
-        start = sunset
-        hour_len = night_minutes / 12.0
+        start, hour_len = sunrise, day_minutes / 12
+    else:
+        start, hour_len = sunset, night_minutes / 12
 
-    elapsed = ((hours - 1) + minutes / 60.0) * hour_len
+    elapsed = ((hour - 1) + minute / 60) * hour_len
     return (start + elapsed) % MINUTES_PER_DAY
 
 
@@ -175,50 +141,49 @@ def format_output(
     reverse_wall: float | None,
 ) -> str:
     """Render the calculator result as a multi-line string."""
-    dur = human_duration
-    day_len = result["day_minutes"]
-    night_len = MINUTES_PER_DAY - day_len
+    day_minutes = result["day_minutes"]
+    night_minutes = MINUTES_PER_DAY - day_minutes
     period = "daytime" if result["in_daytime"] else "nighttime"
-    temporal_hour = result["temporal_hour"]
+
     whole_hour = result["current_hour"]
     minute = int(result["minutes"] + 0.5)
-    if minute == 60:
+    if minute == 60:  # rounding pushed us into the next hour
         whole_hour += 1
         minute = 0
-    wall = f"{args.now // 60:02d}:{args.now % 60:02d}"
+
+    def hhmm(minutes: float) -> str:
+        minutes = int(minutes)
+        return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
     lines = [
         "Temporal (unequal) hour calculator",
-        f"  Sunrise : {args.sunrise // 60:02d}:{args.sunrise % 60:02d}",
-        f"  Sunset  : {args.sunset // 60:02d}:{args.sunset % 60:02d}",
+        f"  Sunrise : {hhmm(args.sunrise)}",
+        f"  Sunset  : {hhmm(args.sunset)}",
         (
-            f"  Day     : {dur(day_len)}   "
-            f"1 temporal hour = {dur(day_len / 12.0)} ({day_len / 12.0:.1f} min)"
+            f"  Day     : {human_duration(day_minutes)}   "
+            f"1 temporal hour = {human_duration(day_minutes / 12)} "
+            f"({day_minutes / 12:.1f} min)"
         ),
         (
-            f"  Night   : {dur(night_len)}   "
-            f"1 temporal hour = {dur(night_len / 12.0)} ({night_len / 12.0:.1f} min)"
+            f"  Night   : {human_duration(night_minutes)}   "
+            f"1 temporal hour = {human_duration(night_minutes / 12)} "
+            f"({night_minutes / 12:.1f} min)"
         ),
         "",
-        f"  Current wall-clock time : {wall}",
+        f"  Current wall-clock time : {hhmm(args.now)}",
         f"  You are in {period.capitalize()}.",
         (
             f"  Temporal time : {whole_hour:02d}:{minute:02d}  "
-            f"(hour {whole_hour} of {period}, {temporal_hour:.2f} elapsed)"
+            f"(hour {whole_hour} of {period}, {result['temporal_hour']:.2f} elapsed)"
         ),
     ]
 
     if reverse_wall is not None:
-        input_hours = args.temporal_time // 60
-        input_minutes = args.temporal_time % 60
-        reverse_hours = reverse_wall // 60
-        reverse_minutes = reverse_wall % 60
         lines += [
             "",
             "Temporal -> equinoctial conversion",
-            f"  Input        : {input_hours:02d}:{input_minutes:02d} ",
-            f"({args.period} block)",
-            f"  -> Equinoctial: {reverse_hours:02d}:{reverse_minutes:02d}",
+            (f"  Input        : {hhmm(args.temporal_time)} ({args.period} block)"),
+            f"  -> Equinoctial: {hhmm(reverse_wall)}",
         ]
 
     return "\n".join(lines)
@@ -268,19 +233,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.now is None:
         args.now = current_wallclock_minutes()
 
-    try:
-        result = compute(args.sunrise, args.sunset, args.now)
-    except ValueError as exc:
-        parser_error(str(exc))
+    result = compute(args.sunrise, args.sunset, args.now)
 
-    reverse_wall: float | None = None
+    reverse_wall = None
     if args.temporal_time is not None:
-        try:
-            reverse_wall = temporal_to_wall_clock(
-                args.sunrise, args.sunset, args.temporal_time, args.period
-            )
-        except argparse.ArgumentTypeError as exc:
-            parser_error(str(exc))
+        reverse_wall = temporal_to_wall_clock(
+            args.sunrise, args.sunset, args.temporal_time, args.period
+        )
 
     print(format_output(args, result, reverse_wall))
     return 0
